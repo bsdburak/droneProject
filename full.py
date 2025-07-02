@@ -5,7 +5,7 @@ import threading
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-# ------------------------------ BAĞLANTI, KALKIŞ VE İNİŞ ------------------------------
+# ------------------------------ BAĞLANTI, KALKIŞ VE İNİŞLER ------------------------------
 
 # Drone bağlantı noktaları
 ports = ['udp:127.0.0.1:14550', 'udp:127.0.0.1:14560', 'udp:127.0.0.1:14570']
