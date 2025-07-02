@@ -1,2 +1,2 @@
 # droneProject
-osjhoğsjhoğjhsoğjhoğsjsğojsğog
+denemeemeeee
