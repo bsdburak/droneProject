@@ -47,7 +47,7 @@ class PID:
         self.last_time = time.time()
         return output
 
-def go(vehicle, target_location, tolerance=1.0, timeout=60):
+def go(vehicle, target_location, tolerance=0.5, timeout=60):
     """PID ile drone'u hedefe gönder"""
     
     # PID kontrolcüler
