@@ -6,7 +6,7 @@ import numpy as np
 from pymavlink import mavutil
 from scipy.optimize import linear_sum_assignment
 
-NUM_DRONES = 5  # Drone sayısı
+NUM_DRONES = 3  # Drone sayısı
 
 # Drone bağlantı noktaları
 BASE_PORT = 14550  # Başlangıç port numarası

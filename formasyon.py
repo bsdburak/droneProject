@@ -6,7 +6,7 @@ import numpy as np
 from pymavlink import mavutil
 from scipy.optimize import linear_sum_assignment
 
-NUM_DRONES = 5  # Drone sayısı
+NUM_DRONES = 3  # Drone sayısı
 
 # Drone bağlantı noktaları
 BASE_PORT = 14550  # Başlangıç port numarası
@@ -426,11 +426,11 @@ if __name__ == "__main__":
     time.sleep(10)
     
     #formasyon_sekli(offset, alt)
-    formation_v(5, len(connections), 10, 0) 
+    formation_v(10, len(connections), 10, 0) 
     time.sleep(10)
-    formation_line(5, len(connections), 10, 0) 
+    formation_line(10, len(connections), 10, 0) 
     time.sleep(10)
-    formation_v(5, len(connections), 10, 180) 
+    formation_v(10, len(connections), 10, 180) 
     time.sleep(8)
     print("Tüm formasyonlar başarıyla tamamlandı.")
     time.sleep(40)
