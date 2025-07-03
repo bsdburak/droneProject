@@ -6,7 +6,7 @@ import numpy as np
 from pymavlink import mavutil
 from scipy.optimize import linear_sum_assignment
 
-NUM_DRONES = 5  # Drone sayısı
+NUM_DRONES = 3  # Drone sayısı
 
 # Drone bağlantı noktaları
 BASE_PORT = 14550  # Başlangıç port numarası
@@ -47,12 +47,12 @@ class PID:
         self.last_time = time.time()
         return output
 
-def go(vehicle, target_location, tolerance=1.0, timeout=60):
+def go(vehicle, target_location, tolerance=0.5, timeout=60):
     """PID ile drone'u hedefe gönder"""
     
     # PID kontrolcüler
-    pid_north = PID(0.5, 0.1, 0.2, 3)
-    pid_east = PID(0.5, 0.1, 0.2, 3)
+    pid_north = PID(0.3, 0.05, 0.2, 3)
+    pid_east = PID(0.3, 0.05, 0.2, 3)
     pid_down = PID(0.8, 0.05, 0.02, 2)
     
     start_time = time.time()
@@ -423,16 +423,16 @@ if __name__ == "__main__":
     for t in takeoff_threads:
         t.join()
     print("Kalkış komutları gönderildi.")
-    time.sleep(20)
+    time.sleep(10)
     
     #formasyon_sekli(offset, alt)
-    formation_v(5, len(connections), 10, 0) 
-    time.sleep(20)
-    formation_line(5, len(connections), 10, 0) 
-    time.sleep(20)
-    formation_v(5, len(connections), 10, 180) 
+    formation_v(10, len(connections), 10, 0) 
+    time.sleep(10)
+    formation_line(10, len(connections), 10, 0) 
+    time.sleep(10)
+    formation_v(10, len(connections), 10, 180) 
     time.sleep(8)
     print("Tüm formasyonlar başarıyla tamamlandı.")
-    time.sleep(10)
+    time.sleep(40)
 
     land_all(connections)
