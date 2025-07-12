@@ -399,6 +399,83 @@ def land_all(connections):
         for i, vehicle in enumerate(connections):
             print(f"Drone {i+1} indiriliyor...")
             vehicle.mode = VehicleMode("LAND")
+            
+def formation_reverse_v(spacing_meter, num_drones, alt, donus_acisi_derece=0):
+    center = get_swarm_center(connections)
+    
+    # Ters V formasyonu için pozisyonları hesapla (metre cinsinden)
+    relative_positions_meter = []
+    
+    # Lider drone'un pozisyonunu hesapla (V'nin arkasında)
+    cos_30 = math.cos(math.radians(30))  # ≈ 0.866
+    leader_offset_x = -(2/3) * ((num_drones // 2) * spacing_meter * cos_30)
+    
+    # İlk drone (lider) V'nin arkasına
+    relative_positions_meter.append((leader_offset_x, 0))
+    
+    # Diğer dronelar ters V şeklinde simetrik yerleştirilir
+    for i in range(1, num_drones):
+        # V formasyonundaki sıra numarası (1, 1, 2, 2, 3, 3, ...)
+        row = (i + 1) // 2
+        
+        # Hangi taraf: tek indexler sol (-), çift indexler sağ (+)
+        if i % 2 == 1:  # 1, 3, 5, ... -> sol taraf
+            side = -1
+        else:  # 2, 4, 6, ... -> sağ taraf
+            side = 1
+        
+        # Ters V formasyonu koordinatları
+        # X: ileri doğru (30 derece açı ile)
+        x_offset = leader_offset_x + (row * spacing_meter * cos_30)
+        # Y: yana doğru (30 derece açı ile)
+        y_offset = side * row * spacing_meter * math.sin(math.radians(30))  # sin(30°) = 0.5
+        
+        relative_positions_meter.append((x_offset, y_offset))
+    
+    # Döndürme işlemi (metre cinsinden)
+    rotated_positions_meter = []
+    for x_m, y_m in relative_positions_meter:
+        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, donus_acisi_derece)
+        rotated_positions_meter.append((rotated_x, rotated_y))
+    
+    # Metre cinsinden pozisyonları enlem/boylam'a çevir
+    target_positions = []
+    for x_m, y_m in rotated_positions_meter:
+        # Merkez konumdan başlayarak offsetleri uygula
+        lat_offset, lon_offset = meters_to_degrees(x_m, y_m, center[0])
+        target_lat = center[0] + lat_offset
+        target_lon = center[1] + lon_offset
+        target_positions.append((target_lat, target_lon, alt))
+    
+    # Debug: pozisyonları yazdır
+    print("=== Ters V Formasyonu Pozisyonları ===")
+    print(f"Lider drone offset: {leader_offset_x:.2f}m arkada")
+    for i, (lat, lon, altitude) in enumerate(target_positions):
+        x_rel = rotated_positions_meter[i][0]
+        y_rel = rotated_positions_meter[i][1]
+        print(f"Drone {i+1}: X={x_rel:.2f}m, Y={y_rel:.2f}m (Lat={lat:.8f}, Lon={lon:.8f})")
+    
+    # Hungarian algoritması ile optimum atama
+    cost_matrix = calculate_cost_matrix(connections, target_positions)
+    row_ind, col_ind = assign_targets(cost_matrix)
+    
+    print("=== Drone Atamaları ===")
+    for i, conn in enumerate(connections):
+        target = target_positions[col_ind[i]]
+        current_pos = get_position(conn)
+        distance_to_target = calculate_distance(current_pos[0], current_pos[1], target[0], target[1])
+        print(f"Drone {i+1} -> Hedef Pozisyon {col_ind[i]+1}: {distance_to_target:.2f}m mesafe")
+    
+    # Droneları hedeflerine gönder
+    threads = []
+    for i, conn in enumerate(connections):
+        target = target_positions[col_ind[i]]
+        print(f"Drone {i+1} hedefi: {target}")
+        t = threading.Thread(target=send_goto_with_pid, args=(conn, *target))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
 
 # ----------------- Main -----------------
 
@@ -430,8 +507,8 @@ if __name__ == "__main__":
     time.sleep(10)
     formation_line(10, len(connections), 10, 0) 
     time.sleep(10)
-    formation_v(10, len(connections), 10, 180) 
-    time.sleep(8)
+    formation_reverse_v(10, len(connections), 10, 0) 
+    time.sleep(10)
     print("Tüm formasyonlar başarıyla tamamlandı.")
     time.sleep(40)
 
