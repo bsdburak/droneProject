@@ -1,3 +1,1 @@
-# droneProject
-denemeemeeee
-merhaba github
+Sürü İha yarışması için son kod düzenlemeleri. Bu kod, formasyon uçuşları ve droneların iniş işlemlerini içerir. Formasyonlar arasında geçişler ve droneların iniş moduna geçişleri de eklenmiştir.
