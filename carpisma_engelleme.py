@@ -134,7 +134,7 @@ def get_drone_positions(connections, ref_lat, ref_lon):
 def collision_avoidance_control(connections):
     """Çarpışma engelleme kontrol döngüsü"""
     # Çarpışma engelleme sistemi
-    collision_avoidance = CollisionAvoidance(a=1000.0, beta=0.8, r_s=20.0)
+    collision_avoidance = CollisionAvoidance(a=1000.0, beta=0.8, r_s=3.0)
     
     # Referans nokta (ilk drone'un başlangıç konumu)
     ref_lat = connections[0].location.global_relative_frame.lat
