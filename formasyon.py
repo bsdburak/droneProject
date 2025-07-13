@@ -51,9 +51,9 @@ def go(vehicle, target_location, tolerance=0.5, timeout=60):
     """PID ile drone'u hedefe gönder"""
     
     # PID kontrolcüler
-    pid_north = PID(0.3, 0.05, 0.2, 3)
-    pid_east = PID(0.3, 0.05, 0.2, 3)
-    pid_down = PID(0.8, 0.05, 0.02, 2)
+    pid_north = PID(0.3, 0.05, 0.5, 3)
+    pid_east  = PID(0.3, 0.05, 0.5, 3)
+    pid_down  = PID(0.8, 0.05, 0.1, 2)
     
     start_time = time.time()
     

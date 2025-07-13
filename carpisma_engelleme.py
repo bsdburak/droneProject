@@ -123,6 +123,10 @@ def get_drone_positions(connections, ref_lat, ref_lon):
         d_north = (lat - ref_lat) * 111000
         d_east = (lon - ref_lon) * 111000 * math.cos(math.radians(ref_lat))
         
+        # GPS hata toleransı ekle
+        d_north = round(d_north, 2)  # Hassasiyet artırımı
+        d_east = round(d_east, 2)
+        
         positions.append([d_north, d_east])
     
     return positions
@@ -147,16 +151,22 @@ def collision_avoidance_control(connections):
             # Çarpışma engelleme kuvveti
             repulsive_force = collision_avoidance.calculate_total_force(i, current_positions)
             
-            # Hız sınırlaması
+            # Hız sınırlaması ve dinamik hız ayarı
             max_velocity = 3.0  # m/s
             force_magnitude = np.linalg.norm(repulsive_force)
             if force_magnitude > max_velocity:
                 repulsive_force = repulsive_force / force_magnitude * max_velocity
+            elif force_magnitude < 1.0:  # Dinamik hız azaltma
+                repulsive_force = repulsive_force * 0.5
             
             # Hız komutunu gönder
             vx = repulsive_force[0]
             vy = repulsive_force[1]
             send_velocity(vehicle, vx, vy, 0)
+        
+        # Simülasyon testi için bir kontrol ekle
+        if not connections[0].location.global_relative_frame.alt:
+            print("⚠️ Simülasyon ortamında test ediliyor...")
         
         time.sleep(0.1)  # 100ms döngü
 
