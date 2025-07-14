@@ -25,6 +25,9 @@ KP = 0.5  # Pozisyon kazancı
 KD = 0.3  # Hız kazancı
 MAX_VELOCITY = 3.0  # Maksimum hız limiti (m/s)
 
+# Her drone için son formation control hızları
+formation_velocities = {}
+
 for i, port in enumerate(ports):
     try:
         vehicle = connect(port, wait_ready=True)
@@ -34,6 +37,29 @@ for i, port in enumerate(ports):
         print(f"✗ Drone {i+1} bağlantı hatası: {e}")
 
 print(f"Toplam {len(connections)} drone bağlandı.")
+
+# PID sınıfı
+class PID:
+    def __init__(self, kp, ki, kd, limit=5):
+        self.kp, self.ki, self.kd = kp, ki, kd
+        self.limit = limit
+        self.prev_error = 0
+        self.integral = 0
+        self.last_time = time.time()
+        
+    def update(self, error):
+        dt = time.time() - self.last_time
+        if dt <= 0: dt = 0.01
+        
+        self.integral += error * dt
+        derivative = (error - self.prev_error) / dt
+        
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        output = max(-self.limit, min(self.limit, output))
+        
+        self.prev_error = error
+        self.last_time = time.time()
+        return output
 
 # ----------------- Temel Fonksiyonlar -----------------
 
@@ -71,6 +97,23 @@ def send_velocity(vehicle, vx, vy, vz):
         0, 0, 0, mavutil.mavlink.MAV_FRAME_LOCAL_NED,
         0b0000111111000111, 0, 0, 0, vx, vy, vz, 0, 0, 0, 0, 0)
     vehicle.send_mavlink(msg)
+
+def send_combined_velocity(vehicle, nav_vx=0, nav_vy=0, nav_vz=0, form_vx=0, form_vy=0, form_vz=0):
+    """Navigasyon ve formasyon hızlarını birleştirerek gönder"""
+    # Toplam hız
+    total_vx = nav_vx + form_vx
+    total_vy = nav_vy + form_vy
+    total_vz = nav_vz + form_vz
+    
+    # Hız sınırlaması
+    total_speed = math.sqrt(total_vx**2 + total_vy**2 + total_vz**2)
+    if total_speed > MAX_VELOCITY:
+        scale = MAX_VELOCITY / total_speed
+        total_vx *= scale
+        total_vy *= scale
+        total_vz *= scale
+    
+    send_velocity(vehicle, total_vx, total_vy, total_vz)
 
 def get_position(vehicle):
     """Drone'un mevcut konumunu döndürür"""
@@ -254,7 +297,7 @@ def double_integrator_control(i, positions, velocities, formation_deltas, kp=KP,
 
 def formation_control_loop():
     """Sürekli çalışan formasyon kontrol döngüsü"""
-    global formation_control_active, initial_formation_deltas
+    global formation_control_active, initial_formation_deltas, formation_velocities
     
     print("🔄 Formasyon kontrol döngüsü başlatıldı")
     
@@ -265,6 +308,11 @@ def formation_control_loop():
         for (j, i), delta in initial_formation_deltas.items():
             print(f"   δ_{j}{i} = [{delta[0]:.2f}, {delta[1]:.2f}, {delta[2]:.2f}]")
     
+    # Formation velocities başlangıç
+    for i, vehicle in enumerate(connections):
+        drone_id = get_drone_id(vehicle)
+        formation_velocities[drone_id] = (0, 0, 0)
+    
     while formation_control_active:
         try:
             # Mevcut pozisyon ve hızları al
@@ -273,6 +321,8 @@ def formation_control_loop():
             
             # Her drone için kontrol sinyali hesapla
             for i, vehicle in enumerate(connections):
+                drone_id = get_drone_id(vehicle)
+                
                 control_signal = double_integrator_control(
                     i, positions, velocities, initial_formation_deltas, KP, KD
                 )
@@ -285,8 +335,11 @@ def formation_control_loop():
                     control_signal[1] *= scale
                     control_signal[2] *= scale
                 
-                # Hız komutunu gönder
-                send_velocity(vehicle, control_signal[0], control_signal[1], control_signal[2])
+                # Formasyon hızını kaydet (navigasyon hızı ile birleştirilecek)
+                formation_velocities[drone_id] = (control_signal[0], control_signal[1], control_signal[2])
+                
+                # Eğer navigasyon aktif değilse, sadece formasyon hızı gönder
+                send_combined_velocity(vehicle, 0, 0, 0, control_signal[0], control_signal[1], control_signal[2])
             
             time.sleep(0.1)  # 10Hz kontrol frekansı
             
@@ -322,14 +375,13 @@ def stop_formation_control():
 def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, kd=0.3, tolerance=2.0, timeout=120):
     """
     Sürü formasyonu koruyarak hedef noktaya hareket eder
-    Formül: u'ᵢ = kₜₚ(p* - p̄) + kₜₐ(- ṗ̄)
+    Formasyon hızı ile navigasyon hızı birleştirilir
     """
     print(f"🎯 Sürü hedef noktaya hareket ediyor: ({target_lat:.8f}, {target_lon:.8f}, {target_alt}m)")
     
-    # Formasyon kontrolünü geçici olarak durdur
-    was_active = formation_control_active
-    if was_active:
-        stop_formation_control()
+    # Formasyon kontrolü aktif kalır
+    if not formation_control_active:
+        start_formation_control()
     
     start_time = time.time()
     
@@ -354,21 +406,24 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
         
         print(f"📍 Merkez: ({current_center[0]:.8f}, {current_center[1]:.8f}, {current_center[2]:.2f})")
         print(f"📏 Mesafe: {horizontal_distance:.2f}m, Yükseklik farkı: {alt_error:.2f}m")
-        print(f"🏃 Sürü hızı: ({current_velocity[0]:.2f}, {current_velocity[1]:.2f}, {current_velocity[2]:.2f}) m/s")
         
         # Hedefe ulaştı mı?
         if horizontal_distance <= tolerance and abs(alt_error) <= tolerance:
             print("✅ Sürü hedefe ulaştı!")
-            # Tüm droneları durdur
+            # Sadece formasyon hızı ile hareket et
             for vehicle in vehicles:
-                send_velocity(vehicle, 0, 0, 0)
+                drone_id = get_drone_id(vehicle)
+                form_vel = formation_velocities.get(drone_id, (0, 0, 0))
+                send_combined_velocity(vehicle, 0, 0, 0, form_vel[0], form_vel[1], form_vel[2])
             break
         
         # Timeout kontrolü
         if time.time() - start_time > timeout:
             print("⏰ Timeout! Sürü durdurluyor...")
             for vehicle in vehicles:
-                send_velocity(vehicle, 0, 0, 0)
+                drone_id = get_drone_id(vehicle)
+                form_vel = formation_velocities.get(drone_id, (0, 0, 0))
+                send_combined_velocity(vehicle, 0, 0, 0, form_vel[0], form_vel[1], form_vel[2])
             break
         
         # Kontrol formülü: u'ᵢ = kₜₚ(p* - p̄) + kₜₐ(- ṗ̄)
@@ -382,34 +437,30 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
         vy_damping = -kd * current_velocity[1]
         vz_damping = -kd * current_velocity[2]
         
-        # Toplam kontrol sinyali
-        control_vx = vx_position + vx_damping
-        control_vy = vy_position + vy_damping
-        control_vz = vz_position + vz_damping
+        # Toplam navigasyon kontrol sinyali
+        nav_vx = vx_position + vx_damping
+        nav_vy = vy_position + vy_damping
+        nav_vz = vz_position + vz_damping
         
-        # Hız sınırlaması
-        max_speed = 5.0  # m/s
-        speed_magnitude = math.sqrt(control_vx**2 + control_vy**2 + control_vz**2)
-        if speed_magnitude > max_speed:
-            scale = max_speed / speed_magnitude
-            control_vx *= scale
-            control_vy *= scale
-            control_vz *= scale
+        # Navigasyon hız sınırlaması
+        nav_speed = math.sqrt(nav_vx**2 + nav_vy**2 + nav_vz**2)
+        max_nav_speed = 3.0  # m/s
+        if nav_speed > max_nav_speed:
+            scale = max_nav_speed / nav_speed
+            nav_vx *= scale
+            nav_vy *= scale
+            nav_vz *= scale
         
-        print(f"🎮 Kontrol: Pos=({vx_position:.2f}, {vy_position:.2f}, {vz_position:.2f}), " +
-              f"Damp=({vx_damping:.2f}, {vy_damping:.2f}, {vz_damping:.2f})")
-        print(f"🚀 Toplam hız: ({control_vx:.2f}, {control_vy:.2f}, {control_vz:.2f}) m/s")
+        print(f"🎮 Navigasyon hızı: ({nav_vx:.2f}, {nav_vy:.2f}, {nav_vz:.2f}) m/s")
         
-        # Tüm droneları aynı hızla hareket ettir
+        # Tüm droneları navigasyon + formasyon hızı ile hareket ettir
         for i, vehicle in enumerate(vehicles):
-            send_velocity(vehicle, control_vx, control_vy, control_vz)
+            drone_id = get_drone_id(vehicle)
+            form_vel = formation_velocities.get(drone_id, (0, 0, 0))
+            send_combined_velocity(vehicle, nav_vx, nav_vy, nav_vz, form_vel[0], form_vel[1], form_vel[2])
         
         print("-" * 60)
         time.sleep(0.5)  # Kontrol döngüsü frekansı
-    
-    # Formasyon kontrolünü tekrar başlat
-    if was_active:
-        start_formation_control()
 
 # ----------------- Rotasyon (Mevcut kod korundu) -----------------
 
@@ -476,13 +527,14 @@ def calculate_target_angle(current_lat, current_lon, target_lat, target_lon):
     return target_angle
 
 def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
-    """Formasyonu hedef noktaya yönlendiren rotasyon (basitleştirilmiş)"""
-    global current_formation_angle
+    """Formasyonu hedef noktaya yönlendiren rotasyon (formasyon kontrolü geçici olarak durdurulur)"""
+    global current_formation_angle, initial_formation_deltas
     
     # Formasyon kontrolünü geçici olarak durdur
-    was_active = formation_control_active
-    if was_active:
+    was_formation_active = formation_control_active
+    if was_formation_active:
         stop_formation_control()
+        print("🔄 Rotasyon için formasyon kontrolü geçici olarak durduruldu")
     
     # Referans nokta (ilk drone'un konumu)
     ref_lat = connections[0].location.global_relative_frame.lat
@@ -515,14 +567,16 @@ def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
             d_east = (lon - ref_lon) * 111000 * math.cos(math.radians(ref_lat))
             
             # Rotasyon hızı vektörü (v = ω × r)
-            vx = -angular_velocity * d_east  # Kuzey yönü
-            vy = angular_velocity * d_north   # Doğu yönü
+            rot_vx = -angular_velocity * d_east  # Kuzey yönü
+            rot_vy = angular_velocity * d_north   # Doğu yönü
+            rot_vz = 0
             
-            send_velocity(vehicle, vx, vy, 0)
+            # Sadece rotasyon hızı gönder (formasyon kontrolü kapalı)
+            send_velocity(vehicle, rot_vx, rot_vy, rot_vz)
         
         time.sleep(0.1)
     
-    # Rotasyon bitince durdur
+    # Rotasyon bitince droneları durdur
     for vehicle in connections:
         send_velocity(vehicle, 0, 0, 0)
     
@@ -532,9 +586,21 @@ def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
     print(f"✅ Rotasyon tamamlandı.")
     print(f"   Yeni formasyon açısı: {math.degrees(current_formation_angle):.1f}°")
     
+    # Rotasyon sonrası yeni formasyon delta değerlerini hesapla
+    print("🔄 Rotasyon sonrası formasyon delta değerleri yeniden hesaplanıyor...")
+    time.sleep(2)  # Droneların durması için bekle
+    
+    # Yeni formasyon delta değerlerini hesapla
+    initial_formation_deltas = calculate_initial_formation_deltas(connections)
+    print("📐 Yeni formasyon delta değerleri:")
+    for (j, i), delta in initial_formation_deltas.items():
+        print(f"   δ_{j}{i} = [{delta[0]:.2f}, {delta[1]:.2f}, {delta[2]:.2f}]")
+    
     # Formasyon kontrolünü tekrar başlat
-    if was_active:
+    if was_formation_active:
         start_formation_control()
+        print("✅ Formasyon kontrolü tekrar aktif edildi")
+        time.sleep(2)  # Formasyon kontrolünün stabilize olması için bekle
 
 # ----------------- Main -----------------
 
