@@ -12,3 +12,5 @@ initial_formation_deltas = calculate_initial_formation_deltas(connections)>
         time.sleep(2)  # Formasyon kontrolünün stabilize olması için bekle
 
 global current_formation_angle, initial_formation_deltas, formation_control_active
+
+bu kodda rotasyon anında normalde iyi çalışması gerekirken dronelar birbirinden her rotasyonda uzaklaşmaya başlıyor. sebebi formasyon kontrolünün threadinin kapanmıyor oluşu olabilir mi
