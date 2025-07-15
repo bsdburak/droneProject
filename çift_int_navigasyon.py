@@ -21,8 +21,8 @@ formation_control_active = False
 formation_control_thread = None
 
 # Çift integratör kontrol parametreleri
-KP = 0.5  # Pozisyon kazancı
-KD = 0.3  # Hız kazancı
+KP = 0.3  # Pozisyon kazancı
+KD = 0.05  # Hız kazancı
 MAX_VELOCITY = 3.0  # Maksimum hız limiti (m/s)
 
 # Her drone için son formation control hızları
@@ -220,25 +220,6 @@ def get_relative_velocities_3d(vehicles):
     
     return velocities
 
-def calculate_initial_formation_deltas(vehicles):
-    """Başlangıç formasyonu delta değerlerini hesaplar (δ_ji = p_j - p_i)"""
-    positions = get_relative_positions_3d(vehicles)
-    N = len(vehicles)
-    
-    # Delta matrisini hesapla
-    deltas = {}
-    for i in range(N):
-        for j in range(N):
-            if i != j:
-                delta = [
-                    positions[j][0] - positions[i][0],  # North
-                    positions[j][1] - positions[i][1],  # East
-                    positions[j][2] - positions[i][2]   # Up
-                ]
-                deltas[(j, i)] = delta
-    
-    return deltas
-
 def double_integrator_control(i, positions, velocities, formation_deltas, kp=KP, kd=KD):
     """
     Çift integratör formasyon kontrol formülü:
@@ -301,9 +282,12 @@ def formation_control_loop():
     
     print("🔄 Formasyon kontrol döngüsü başlatıldı")
     
+    ref_lat = connections[0].location.global_relative_frame.lat
+    ref_lon = connections[0].location.global_relative_frame.lon
+
     # Başlangıç formasyonu delta değerlerini hesapla
     if initial_formation_deltas is None:
-        initial_formation_deltas = calculate_initial_formation_deltas(connections)
+        initial_formation_deltas = calculate_initial_formation_deltas(connections, ref_lat, ref_lon)
         print("📐 Başlangıç formasyon delta değerleri:")
         for (j, i), delta in initial_formation_deltas.items():
             print(f"   δ_{j}{i} = [{delta[0]:.2f}, {delta[1]:.2f}, {delta[2]:.2f}]")
@@ -338,10 +322,10 @@ def formation_control_loop():
                 # Formasyon hızını kaydet (navigasyon hızı ile birleştirilecek)
                 formation_velocities[drone_id] = (control_signal[0], control_signal[1], control_signal[2])
                 
-                # Eğer navigasyon aktif değilse, sadece formasyon hızı gönder
-                send_combined_velocity(vehicle, 0, 0, 0, control_signal[0], control_signal[1], control_signal[2])
+                # --- velocity gönderme kaldırıldı ---
+                # send_combined_velocity(vehicle, 0, 0, 0, control_signal[0], control_signal[1], control_signal[2])
             
-            time.sleep(0.1)  # 10Hz kontrol frekansı
+            time.sleep(0.1)  # 1Hz kontrol frekansı
             
         except Exception as e:
             print(f"❌ Formasyon kontrol hatası: {e}")
@@ -508,6 +492,21 @@ class RotationController:
         self.chi1 += self.chi2 * dt  # Pozisyon güncelleme
         return self.chi1, self.chi2
 
+def calculate_initial_formation_deltas(vehicles, ref_lat, ref_lon):
+    """Başlangıç formasyonu delta değerlerini hesapla"""
+    deltas = []
+    for vehicle in connections:
+        lat = vehicle.location.global_relative_frame.lat
+        lon = vehicle.location.global_relative_frame.lon
+        
+        # Referans noktaya göre konumu hesapla
+        d_north = (lat - ref_lat) * 111000
+        d_east = (lon - ref_lon) * 111000 * math.cos(math.radians(ref_lat))
+        
+        deltas.append(np.array([d_north, d_east]))
+    
+    return deltas
+
 def normalize_angle(angle):
     """Açıyı -π ve π aralığına normalize et"""
     while angle > math.pi:
@@ -526,19 +525,49 @@ def calculate_target_angle(current_lat, current_lon, target_lat, target_lon):
     target_angle = math.atan2(d_east, d_north)
     return target_angle
 
-def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
-    """Formasyonu hedef noktaya yönlendiren rotasyon (formasyon kontrolü geçici olarak durdurulur)"""
-    global current_formation_angle, initial_formation_deltas
+def calculate_formation_velocity(i, positions, psi_s, psi_dot_s, deltas, k_p=1.0, k_R=1.0):
+    """Formasyonu koruyan hız komutları (u_i^t ve u_i^c)"""
+    N = len(positions)
+    u_t = np.zeros(2)  # Pozisyon kontrol terimi
+    u_c = np.zeros(2)  # Rotasyon kompanzasyon terimi
     
-    # Formasyon kontrolünü geçici olarak durdur
+    R = rotation_matrix(psi_s)
+    dR_dpsi = derivative_rotation_matrix(psi_s)
+    
+    for j in range(N):
+        if j == i:
+            continue
+            
+        # δ_ji = δ_j - δ_i (drone'lar arası istenen mesafe)
+        delta_ji = deltas[j] - deltas[i]
+        
+        # u_i^t terimi: pozisyon hatası kontrolü
+        pos_error = (positions[j] - positions[i]) - R @ delta_ji
+        u_t += pos_error
+        
+        # u_i^c terimi: rotasyon kompanzasyonu  
+        u_c += (dR_dpsi @ delta_ji) * psi_dot_s
+    
+    # Toplam hız komutu
+    u_total = k_p * u_t - k_R * u_c
+    
+    return u_total
+
+def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
+    """Formasyonu hedef noktaya yönlendiren rotasyon"""
+    global current_formation_angle, initial_formation_deltas, formation_control_active
+    
     was_formation_active = formation_control_active
     if was_formation_active:
         stop_formation_control()
         print("🔄 Rotasyon için formasyon kontrolü geçici olarak durduruldu")
-    
+
     # Referans nokta (ilk drone'un konumu)
     ref_lat = connections[0].location.global_relative_frame.lat
     ref_lon = connections[0].location.global_relative_frame.lon
+    
+    # Başlangıç formasyonu delta değerlerini al (ilk seferinde hesapla)
+    formation_deltas = calculate_initial_formation_deltas(connections, ref_lat, ref_lon)
     
     # Hedef açıyı hesapla
     target_angle = calculate_target_angle(ref_lat, ref_lon, target_lat, target_lon)
@@ -547,60 +576,60 @@ def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
     angle_diff = normalize_angle(target_angle - current_formation_angle)
     final_target_angle = current_formation_angle + angle_diff
     
+    # Rotasyon kontrolörü (mevcut açıdan hedef açıya)
+    rotation_controller = RotationController(current_formation_angle, final_target_angle, 0.0, t_mi)
+    
     print(f"🔄 Rotasyon başlıyor:")
     print(f"   Mevcut açı: {math.degrees(current_formation_angle):.1f}°")
     print(f"   Hedef açı: {math.degrees(target_angle):.1f}°")
     print(f"   Rotasyon miktarı: {math.degrees(angle_diff):.1f}° ({t_mi}s)")
     
-    # Basit rotasyon (tüm dronelar aynı açısal hızla döner)
-    angular_velocity = angle_diff / t_mi  # rad/s
-    
     start_time = time.time()
+    dt = 0.1
+    
     while time.time() - start_time <= t_mi:
-        # Her drone için rotasyon hızını hesapla
-        for i, vehicle in enumerate(connections):
-            # Merkeze göre konumu al
+        t_now = time.time() - start_time
+        
+        # Rotasyon açısı ve hızını güncelle
+        psi_s, psi_dot_s = rotation_controller.update(dt, t_now)
+        
+        # Güncel drone pozisyonları
+        current_positions = []
+        for vehicle in connections:
             lat = vehicle.location.global_relative_frame.lat
             lon = vehicle.location.global_relative_frame.lon
-            
             d_north = (lat - ref_lat) * 111000
             d_east = (lon - ref_lon) * 111000 * math.cos(math.radians(ref_lat))
-            
-            # Rotasyon hızı vektörü (v = ω × r)
-            rot_vx = -angular_velocity * d_east  # Kuzey yönü
-            rot_vy = angular_velocity * d_north   # Doğu yönü
-            rot_vz = 0
-            
-            # Sadece rotasyon hızı gönder (formasyon kontrolü kapalı)
-            send_velocity(vehicle, rot_vx, rot_vy, rot_vz)
+            current_positions.append(np.array([d_north, d_east]))
         
-        time.sleep(0.1)
+        # Her drone için hız komutunu hesapla (sabit formation_deltas kullan)
+        for i, vehicle in enumerate(connections):
+            velocity = calculate_formation_velocity(
+                i, current_positions, psi_s, psi_dot_s, formation_deltas, k_p=0.3, k_R=0.05
+            )
+            
+            vx = velocity[0]
+            vy = velocity[1]
+            send_velocity(vehicle, vx, vy, 0)
+        
+        time.sleep(dt)
     
-    # Rotasyon bitince droneları durdur
+    # Rotasyon bitince durdur
     for vehicle in connections:
         send_velocity(vehicle, 0, 0, 0)
     
     # Formasyonun yeni yönünü güncelle
     current_formation_angle = normalize_angle(final_target_angle)
-    
-    print(f"✅ Rotasyon tamamlandı.")
-    print(f"   Yeni formasyon açısı: {math.degrees(current_formation_angle):.1f}°")
-    
-    # Rotasyon sonrası yeni formasyon delta değerlerini hesapla
-    print("🔄 Rotasyon sonrası formasyon delta değerleri yeniden hesaplanıyor...")
-    time.sleep(2)  # Droneların durması için bekle
-    
-    # Yeni formasyon delta değerlerini hesapla
+
     initial_formation_deltas = calculate_initial_formation_deltas(connections)
-    print("📐 Yeni formasyon delta değerleri:")
-    for (j, i), delta in initial_formation_deltas.items():
-        print(f"   δ_{j}{i} = [{delta[0]:.2f}, {delta[1]:.2f}, {delta[2]:.2f}]")
-    
     # Formasyon kontrolünü tekrar başlat
     if was_formation_active:
         start_formation_control()
         print("✅ Formasyon kontrolü tekrar aktif edildi")
         time.sleep(2)  # Formasyon kontrolünün stabilize olması için bekle
+    
+    print(f"✅ Rotasyon tamamlandı.")
+    print(f"   Yeni formasyon açısı: {math.degrees(current_formation_angle):.1f}°")
 
 # ----------------- Main -----------------
 
