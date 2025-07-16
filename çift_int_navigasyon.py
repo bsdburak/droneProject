@@ -621,7 +621,10 @@ def rotate_formation_to_target(connections, target_lat, target_lon, t_mi=10.0):
     # Formasyonun yeni yönünü güncelle
     current_formation_angle = normalize_angle(final_target_angle)
 
-    initial_formation_deltas = calculate_initial_formation_deltas(connections)
+    ref_lat = connections[0].location.global_relative_frame.lat
+    ref_lon = connections[0].location.global_relative_frame.lon
+
+    initial_formation_deltas = calculate_initial_formation_deltas(connections, ref_lat, ref_lon)
     # Formasyon kontrolünü tekrar başlat
     if was_formation_active:
         start_formation_control()
