@@ -78,9 +78,9 @@ def calculate_repulsion_force(vehicle, safe_distance=2.0, gain=1.5):
 def go(vehicle, target_location, tolerance=0.5, timeout=60):
     """PID + çarpışma engelleme ile drone'u hedefe gönder"""
     
-    pid_north = PID(0.3, 0.05, 0.5, 3)
-    pid_east  = PID(0.3, 0.05, 0.5, 3)
-    pid_down  = PID(0.8, 0.05, 0.1, 2)
+    pid_north = PID(0.4, 0.02, 0.6, 4)
+    pid_east  = PID(0.4, 0.02, 0.6, 4)
+    pid_down  = PID(0.7, 0.03, 0.2, 3)
 
     start_time = time.time()
     
@@ -551,15 +551,15 @@ if __name__ == "__main__":
     print("Kalkış komutları gönderildi.")
     time.sleep(10)
     
-    #formasyon_sekli(offset, alt)
-    formation_v(10, len(connections), 10, 0) 
-    time.sleep(10)
-    formation_line(10, len(connections), 10, 0) 
-    time.sleep(10)
-    formation_reverse_v(10, len(connections), 10, 0) 
-    time.sleep(10)
+    #formation_v(spacing_meter, num_drones, alt, donus_acisi_derece=0)
+    formation_v(5, len(connections), 15, 0) 
+    time.sleep(6)
+    formation_line(10, len(connections), 15, 0) 
+    time.sleep(6)
+    formation_reverse_v(10, len(connections), 15, 0) 
+    time.sleep(6)
     print("Tüm formasyonlar başarıyla tamamlandı.")
-    time.sleep(40)
-
+    formation_line(10, len(connections), 15, 0) 
+    time.sleep(15)
     land_all(connections)
     
