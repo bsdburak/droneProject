@@ -119,11 +119,25 @@ def go(vehicle, target_location, tolerance=0.5, timeout=60):
         total_vy = vy + repulsion_vy
         total_vz = vz + repulsion_vz
         
-        # Maksimum hız limiti uygula
+        # Kalan mesafeye göre hız limiti uygula
         max_speed = 3.0  # m/s
-        speed = math.sqrt(total_vx**2 + total_vy**2 + total_vz**2)
-        if speed > max_speed:
-            scale = max_speed / speed
+        min_speed = 0.3  # m/s - minimum hız
+        slow_down_distance = 3.0  # metre - yavaşlama başlangıç mesafesi
+        
+        # Mesafeye göre hız faktörü hesapla
+        if distance <= slow_down_distance:
+            # Mesafe azaldıkça hızı doğrusal olarak azalt
+            speed_factor = max(min_speed/max_speed, distance / slow_down_distance)
+        else:
+            speed_factor = 1.0
+        
+        # Uyarlanmış maksimum hız
+        adapted_max_speed = max_speed * speed_factor
+        
+        # Mevcut hızı kontrol et ve gerekirse kısıtla
+        current_speed = math.sqrt(total_vx**2 + total_vy**2 + total_vz**2)
+        if current_speed > adapted_max_speed:
+            scale = adapted_max_speed / current_speed
             total_vx *= scale
             total_vy *= scale
             total_vz *= scale
