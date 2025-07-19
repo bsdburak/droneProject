@@ -31,7 +31,7 @@ for i, port in enumerate(ports):
 
 print(f"Toplam {NUM_DRONES} drone bağlandı.")
 
-# ----------------- PID -----------------
+#------------------------Drone PID Ayarları------------------------
 
 class PID:
     def __init__(self, kp, ki, kd, limit=5):
@@ -40,57 +40,114 @@ class PID:
         self.prev_error = 0
         self.integral = 0
         self.last_time = time.time()
-        
+
     def update(self, error):
         dt = time.time() - self.last_time
         if dt <= 0: dt = 0.01
-        
+
         self.integral += error * dt
         derivative = (error - self.prev_error) / dt
-        
+
         output = self.kp * error + self.ki * self.integral + self.kd * derivative
         output = max(-self.limit, min(self.limit, output))
-        
+
         self.prev_error = error
         self.last_time = time.time()
         return output
+    
+def calculate_repulsion_force(vehicle, safe_distance=2.0, gain=1.5):
+    """Çarpışma engelleme kuvvetini hesaplar"""
+    vx, vy, vz = 0, 0, 0
+    current_pos = get_position(vehicle)
+    
+    for other in connections:
+        if other == vehicle:
+            continue
+        other_pos = get_position(other)
+        
+        dx = (current_pos[0] - other_pos[0]) * 111000
+        dy = (current_pos[1] - other_pos[1]) * 111000 * math.cos(math.radians(current_pos[0]))
+        dz = current_pos[2] - other_pos[2]
+        
+        distance = math.sqrt(dx**2 + dy**2 + dz**2)
+        if distance < safe_distance:
+            strength = gain * (safe_distance - distance) / distance
+            vx += dx * strength
+            vy += dy * strength
+            vz += dz * strength
+    return vx, vy, vz
 
 def go(vehicle, target_location, tolerance=0.5, timeout=60):
-    """PID ile drone'u hedefe gönder"""
+    """PID + çarpışma engelleme ile drone'u hedefe gönder"""
     
-    # PID kontrolcüler
-    pid_north = PID(0.4, 0.02, 0.6, 2)
-    pid_east  = PID(0.4, 0.02, 0.6, 2)
-    pid_down  = PID(0.8, 0.05, 0.1, 2)
-    
+    pid_north = PID(0.4, 0.02, 0.6, 4)
+    pid_east  = PID(0.4, 0.02, 0.6, 4)
+    pid_down  = PID(0.7, 0.03, 0.2, 3)
+
     start_time = time.time()
     
     while True:
-        # Mevcut konum
         curr = vehicle.location.global_relative_frame
         
-        # Hatalar (metre)
+        # Hedef konuma olan hata
         north_err = (target_location.lat - curr.lat) * 111000
         east_err = (target_location.lon - curr.lon) * 111000 * math.cos(math.radians(curr.lat))
         down_err = -(target_location.alt - curr.alt)
         
-        # Mesafe kontrolü
         distance = math.sqrt(north_err**2 + east_err**2)
+        
+        # Hedefe ulaşıldı mı?
         if distance <= tolerance and abs(down_err) <= tolerance:
-            send_velocity(vehicle, 0, 0, 0)  # Durdur
+            send_velocity(vehicle, 0, 0, 0)
+            print(f"✅ Drone {get_drone_id(vehicle)} hedefe ulaştı.")
             break
-            
+        
         # Timeout kontrolü
         if time.time() - start_time > timeout:
             send_velocity(vehicle, 0, 0, 0)
+            print(f"⏳ Drone {get_drone_id(vehicle)} timeout! Hedefe ulaşılamadı.")
             break
         
-        # PID çıkışları
+        # PID çıkışları (hedef kuvveti)
         vx = pid_north.update(north_err)
         vy = pid_east.update(east_err)
         vz = pid_down.update(down_err)
         
-        send_velocity(vehicle, vx, vy, vz)
+        # Çarpışma engelleme kuvvetini hesapla
+        repulsion_vx, repulsion_vy, repulsion_vz = calculate_repulsion_force(vehicle)
+        
+        # Toplam hız vektörü (hedef + repulsion)
+        total_vx = vx + repulsion_vx
+        total_vy = vy + repulsion_vy
+        total_vz = vz + repulsion_vz
+        
+        # Kalan mesafeye göre hız limiti uygula
+        max_speed = 3.0  # m/s
+        min_speed = 0.3  # m/s - minimum hız
+        slow_down_distance = 3.0  # metre - yavaşlama başlangıç mesafesi
+        
+        # Mesafeye göre hız faktörü hesapla
+        if distance <= slow_down_distance:
+            # Mesafe azaldıkça hızı doğrusal olarak azalt
+            speed_factor = max(min_speed/max_speed, distance / slow_down_distance)
+        else:
+            speed_factor = 1.0
+        
+        # Uyarlanmış maksimum hız
+        adapted_max_speed = max_speed * speed_factor
+        
+        # Mevcut hızı kontrol et ve gerekirse kısıtla
+        current_speed = math.sqrt(total_vx**2 + total_vy**2 + total_vz**2)
+        if current_speed > adapted_max_speed:
+            scale = adapted_max_speed / current_speed
+            total_vx *= scale
+            total_vy *= scale
+            total_vz *= scale
+        
+        # Debug log
+        print(f"🚁 Drone {get_drone_id(vehicle)} -> TargetVel: ({vx:.2f}, {vy:.2f}, {vz:.2f}) Repulsion: ({repulsion_vx:.2f}, {repulsion_vy:.2f}, {repulsion_vz:.2f}) Total: ({total_vx:.2f}, {total_vy:.2f}, {total_vz:.2f})")
+        
+        send_velocity(vehicle, total_vx, total_vy, total_vz)
         time.sleep(0.1)
 
 def send_velocity(vehicle, vx, vy, vz):
