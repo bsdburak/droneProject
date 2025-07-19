@@ -131,16 +131,28 @@ def land_all(connections):
 
 # ----------------- Sürü Hareketi Fonksiyonu -----------------
 
-def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, kd=0.3, tolerance=2.0, timeout=120):
+def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5, timeout=120):
     """
     Sürü formasyonu koruyarak hedef noktaya hareket eder
-    Formül: u'ᵢ = kₜₚ(p* - p̄) + kₜₐ(- ṗ̄)
+    PID Formül: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kₐ(- ṗ̄)
     """
     print(f"🎯 Sürü hedef noktaya hareket ediyor: ({target_lat:.8f}, {target_lon:.8f}, {target_alt}m)")
     
     start_time = time.time()
     
+    # Integral terimleri için birikmiş hata
+    integral_north = 0.0
+    integral_east = 0.0
+    integral_alt = 0.0
+    
+    # Önceki döngü zamanı
+    prev_time = start_time
+    
     while True:
+        current_time = time.time()
+        dt = current_time - prev_time
+        prev_time = current_time
+        
         # Mevcut sürü merkezi ve hızını hesapla
         current_center = get_swarm_center(vehicles)
         current_velocity = get_swarm_velocity(vehicles)
@@ -156,12 +168,24 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
         )
         alt_error = target_alt - current_center[2]
         
+        # Integral terimlerini güncelle
+        integral_north += north_error * dt
+        integral_east += east_error * dt
+        integral_alt += alt_error * dt
+        
+        # Integral windup koruması
+        max_integral = 50.0  # maksimum integral değeri
+        integral_north = max(-max_integral, min(max_integral, integral_north))
+        integral_east = max(-max_integral, min(max_integral, integral_east))
+        integral_alt = max(-max_integral, min(max_integral, integral_alt))
+        
         # Toplam mesafe kontrolü
         horizontal_distance = math.sqrt(north_error**2 + east_error**2)
         
         print(f"📍 Merkez: ({current_center[0]:.8f}, {current_center[1]:.8f}, {current_center[2]:.2f})")
         print(f"📏 Mesafe: {horizontal_distance:.2f}m, Yükseklik farkı: {alt_error:.2f}m")
         print(f"🏃 Sürü hızı: ({current_velocity[0]:.2f}, {current_velocity[1]:.2f}, {current_velocity[2]:.2f}) m/s")
+        print(f"∫ Integral: ({integral_north:.2f}, {integral_east:.2f}, {integral_alt:.2f})")
         
         # Hedefe ulaştı mı?
         if horizontal_distance <= tolerance and abs(alt_error) <= tolerance:
@@ -178,21 +202,26 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
                 send_velocity(vehicle, 0, 0, 0)
             break
         
-        # Kontrol formülü: u'ᵢ = kₜₚ(p* - p̄) + kₜₐ(- ṗ̄)
-        # Pozisyon terimi: kₜₚ(p* - p̄)
-        vx_position = kp * north_error
-        vy_position = kp * east_error
-        vz_position = kp * alt_error
+        # PID kontrolü: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kₐ(- ṗ̄)
+        # Proportional terimi: kₚ(p* - p̄)
+        vx_proportional = kp * north_error
+        vy_proportional = kp * east_error
+        vz_proportional = kp * alt_error
         
-        # Hız sönümleme terimi: kₜₐ(- ṗ̄)
-        vx_damping = -kd * current_velocity[0]
-        vy_damping = -kd * current_velocity[1]
-        vz_damping = -kd * current_velocity[2]
+        # Integral terimi: kᵢ∫(p* - p̄)dt
+        vx_integral = ki * integral_north
+        vy_integral = ki * integral_east
+        vz_integral = ki * integral_alt
         
-        # Toplam kontrol sinyali
-        control_vx = vx_position + vx_damping
-        control_vy = vy_position + vy_damping
-        control_vz = vz_position + vz_damping
+        # Derivative terimi: kₐ(- ṗ̄)
+        vx_derivative = -kd * current_velocity[0]
+        vy_derivative = -kd * current_velocity[1]
+        vz_derivative = -kd * current_velocity[2]
+        
+        # Toplam PID kontrol sinyali
+        control_vx = vx_proportional + vx_integral + vx_derivative
+        control_vy = vy_proportional + vy_integral + vy_derivative
+        control_vz = vz_proportional + vz_integral + vz_derivative
         
         # Hız sınırlaması
         max_speed = 5.0  # m/s
@@ -203,8 +232,9 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
             control_vy *= scale
             control_vz *= scale
         
-        print(f"🎮 Kontrol: Pos=({vx_position:.2f}, {vy_position:.2f}, {vz_position:.2f}), " +
-              f"Damp=({vx_damping:.2f}, {vy_damping:.2f}, {vz_damping:.2f})")
+        print(f"🎮 P=({vx_proportional:.2f}, {vy_proportional:.2f}, {vz_proportional:.2f}), " +
+              f"I=({vx_integral:.2f}, {vy_integral:.2f}, {vz_integral:.2f}), " +
+              f"D=({vx_derivative:.2f}, {vy_derivative:.2f}, {vz_derivative:.2f})")
         print(f"🚀 Toplam hız: ({control_vx:.2f}, {control_vy:.2f}, {control_vz:.2f}) m/s")
         
         # Tüm droneları aynı hızla hareket ettir
