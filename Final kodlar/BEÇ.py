@@ -59,8 +59,8 @@ def go(vehicle, target_location, tolerance=0.5, timeout=60):
     """PID ile drone'u hedefe gönder"""
     
     # PID kontrolcüler
-    pid_north = PID(0.3, 0.05, 0.5, 3)
-    pid_east  = PID(0.3, 0.05, 0.5, 3)
+    pid_north = PID(0.4, 0.02, 0.6, 2)
+    pid_east  = PID(0.4, 0.02, 0.6, 2)
     pid_down  = PID(0.8, 0.05, 0.1, 2)
     
     start_time = time.time()
@@ -194,10 +194,11 @@ def append_drone(index, standby_drone, target_position):
     connections[index] = standby_drone
     arm(standby_drone)
     time.sleep(2)
-    takeoff(standby_drone, 10)
+    takeoff(standby_drone, 10 + 3)
     time.sleep(10)
 
     lat, lon, alt = target_position
+    send_goto_with_pid(standby_drone, lat, lon, alt + 3)
     send_goto_with_pid(standby_drone, lat, lon, alt)
 
 def land_all(connections):
@@ -518,9 +519,7 @@ if __name__ == "__main__":
 
     # Waypoint listesi (dairesel örnek rota)
     target_waypoints = [
-        (-35.36319568, 149.16515342, 10),
-        (-35.3631253, 149.16538707, 10),
-        (-35.36304971, 149.16519280, 10),
+        (-35.36319568, 149.16515342, 10)
     ]
 
     for(target_lat, target_lon, target_alt) in target_waypoints:
@@ -538,7 +537,7 @@ if __name__ == "__main__":
     RTL_drone_position = get_position(connections[k])
     RTL_drone(k)
 
-    time.sleep(25)
+    time.sleep(15)
 
     print("Yeni drone ekleniyor.")
     append_drone(k, standby_drone, RTL_drone_position)
