@@ -266,7 +266,7 @@ def land_all(connections):
 
 # ----------------- Navigasyon -----------------
 
-def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5, timeout=120):
+def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5):
     """
     Sürü formasyonu koruyarak hedef noktaya hareket eder
     PID Formül: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kₐ(- ṗ̄)
@@ -320,13 +320,6 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
         if horizontal_distance <= tolerance:
             print("✅ Sürü hedefe ulaştı!")
             # Tüm droneları durdur
-            for vehicle in vehicles:
-                send_velocity(vehicle, 0, 0, 0)
-            break
-        
-        # Timeout kontrolü
-        if time.time() - start_time > timeout:
-            print("⏰ Timeout! Sürü durdurluyor...")
             for vehicle in vehicles:
                 send_velocity(vehicle, 0, 0, 0)
             break
