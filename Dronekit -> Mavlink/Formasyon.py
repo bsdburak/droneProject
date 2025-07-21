@@ -58,9 +58,12 @@ class MavlinkVehicle:
                     self.lon = msg.lon / 1e7
                     self.alt = msg.alt / 1000.0
                     self.relative_alt = msg.relative_alt / 1000.0
+                
+                # Beklenmeyen mesajları sessizce geç
+                else:
+                    continue
             except Exception as e:
                 print(f"Mesaj takip hatası (drone {self.drone_id}): {e}")
-                # Kısa bir bekleme ile tekrar dene
                 time.sleep(0.1)
 
     def wait_for_target(self):
@@ -284,8 +287,11 @@ def send_velocity(vehicle, vx, vy, vz):
             vx, vy, vz,  # velocity
             0, 0, 0,  # acceleration
             0, 0)  # yaw, yaw_rate
+        
+        # Sadece debug modunda hız bilgisi göster
+        log_debug(f"🚁 Drone {vehicle.drone_id} -> Hız: ({vx:.2f}, {vy:.2f}, {vz:.2f})")
     except Exception as e:
-        print(f"Hız komutu gönderme hatası (drone {vehicle.drone_id}): {e}")
+        log_error(f"Drone {vehicle.drone_id} - Hız komutu hatası: {e}")
 
 def send_goto_with_pid(vehicle, lat, lon, alt):
     """PID ile drone'u belirtilen koordinatlara gönderir (Mavlink uyumlu)"""
@@ -768,14 +774,30 @@ def formation_reverse_v(spacing_meter, num_drones, alt, donus_acisi_derece=0):
 
 # ----------------- Main -----------------
 
+# Debugging ayarı - Çıktı miktarını kontrol eder
+DEBUG_OUTPUT = False  # Terminal çıktısını azaltmak için False yapın
+
+def log_debug(message):
+    """Debug mesajlarını sadece debug modu açıksa gösterir"""
+    if DEBUG_OUTPUT:
+        print(message)
+
+def log_info(message):
+    """Bilgi mesajlarını gösterir"""
+    print(message)
+
+def log_error(message):
+    """Hata mesajlarını gösterir"""
+    print(f"❌ HATA: {message}")
+
 if __name__ == "__main__":
     # Sistemde en az 1 drone varsa devam et
     if len(connections) == 0:
-        print("Hiçbir drone bağlanamadı! Program sonlandırılıyor.")
+        log_error("Hiçbir drone bağlanamadı! Program sonlandırılıyor.")
         exit(1)
     
     # Arm işlemini paralel yap
-    print("Droneları arm etme işlemi başlatılıyor...")
+    log_info("Droneları arm etme işlemi başlatılıyor...")
     arm_threads = []
     for conn in connections:
         t = threading.Thread(target=arm, args=(conn,))
@@ -783,11 +805,11 @@ if __name__ == "__main__":
         t.start()
     for t in arm_threads:
         t.join()
-    print("Tüm dronelar arm edildi.")
+    log_info("Tüm dronelar arm edildi.")
     time.sleep(2)
 
     # Kalkış işlemini paralel yap
-    print("Kalkış işlemi başlatılıyor...")
+    log_info("Kalkış işlemi başlatılıyor...")
     takeoff_threads = []
     for conn in connections:
         t = threading.Thread(target=takeoff, args=(conn, 10))
@@ -795,31 +817,35 @@ if __name__ == "__main__":
         t.start()
     for t in takeoff_threads:
         t.join()
-    print("Kalkış komutları gönderildi.")
+    log_info("Kalkış komutları gönderildi. Yükselme bekleniyor...")
     time.sleep(10)
     
     # Formasyonları daha güvenli şekilde uygula
     try:
-        print("V formasyonu uygulanıyor...")
+        # Formasyon geçişleri arasında daha fazla bekleme süresi ekle
+        log_info("\n📊 V formasyonu uygulanıyor...")
         formation_v(5, len(connections), 15, 0)
-        time.sleep(6)
+        log_info("V formasyonu tamamlandı, dengeleme bekleniyor...")
+        time.sleep(10)  # Daha uzun dengeleme süresi
         
-        print("Line formasyonu uygulanıyor...")
+        log_info("\n📊 Line formasyonu uygulanıyor...")
         formation_line(10, len(connections), 15, 0)
-        time.sleep(6)
+        log_info("Line formasyonu tamamlandı, dengeleme bekleniyor...")
+        time.sleep(10)
         
-        print("Ters V formasyonu uygulanıyor...")
+        log_info("\n📊 Ters V formasyonu uygulanıyor...")
         formation_reverse_v(10, len(connections), 15, 0)
-        time.sleep(6)
+        log_info("Ters V formasyonu tamamlandı, dengeleme bekleniyor...")
+        time.sleep(10)
         
-        print("Tüm formasyonlar başarıyla tamamlandı.")
-        print("Son formasyon: Line")
+        log_info("\n📊 Son formasyon: Line")
         formation_line(10, len(connections), 15, 0)
-        time.sleep(15)
+        log_info("Son formasyon tamamlandı, inişe hazırlanıyor...")
+        time.sleep(10)
     except Exception as e:
-        print(f"Formasyon sırasında hata: {e}")
+        log_error(f"Formasyon sırasında hata: {e}")
     finally:
-        print("İniş işlemi başlatılıyor...")
+        log_info("\n🛬 İniş işlemi başlatılıyor...")
         land_all(connections)
-        print("Program tamamlandı.")
+        log_info("Program tamamlandı.")
 
