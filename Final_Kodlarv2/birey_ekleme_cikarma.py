@@ -41,7 +41,7 @@ for i, port in enumerate(ports):
 
 print(f"Toplam {NUM_DRONES} drone bağlandı.")
 
-# ----------------- PID -----------------
+#------------------------Drone PID Ayarları------------------------
 
 class PID:
     def __init__(self, kp, ki, kd, limit=5):
@@ -50,55 +50,82 @@ class PID:
         self.prev_error = 0
         self.integral = 0
         self.last_time = time.time()
-        
+
     def update(self, error):
         dt = time.time() - self.last_time
         if dt <= 0: dt = 0.01
-        
+
         self.integral += error * dt
         derivative = (error - self.prev_error) / dt
-        
+
         output = self.kp * error + self.ki * self.integral + self.kd * derivative
         output = max(-self.limit, min(self.limit, output))
-        
+
         self.prev_error = error
         self.last_time = time.time()
         return output
 
 def go(vehicle, target_location, tolerance=0.5, timeout=60):
-    """PID ile drone'u hedefe gönder"""
+    """PID + çarpışma engelleme ile drone'u hedefe gönder"""
     
-    # PID kontrolcüler
-    pid_north = PID(0.4, 0.02, 0.6, 2)
-    pid_east  = PID(0.4, 0.02, 0.6, 2)
-    pid_down  = PID(0.8, 0.05, 0.1, 2)
-    
+    pid_north = PID(0.4, 0.02, 0.6, 4)
+    pid_east  = PID(0.4, 0.02, 0.6, 4)
+    pid_down  = PID(0.7, 0.03, 0.2, 3)
+
     start_time = time.time()
     
     while True:
-        # Mevcut konum
         curr = vehicle.location.global_relative_frame
         
-        # Hatalar (metre)
+        # Hedef konuma olan hata
         north_err = (target_location.lat - curr.lat) * 111000
         east_err = (target_location.lon - curr.lon) * 111000 * math.cos(math.radians(curr.lat))
         down_err = -(target_location.alt - curr.alt)
         
-        # Mesafe kontrolü
         distance = math.sqrt(north_err**2 + east_err**2)
+        
+        # Hedefe ulaşıldı mı?
         if distance <= tolerance and abs(down_err) <= tolerance:
-            send_velocity(vehicle, 0, 0, 0)  # Durdur
+            send_velocity(vehicle, 0, 0, 0)
+            print(f"✅ Drone {get_drone_id(vehicle)} hedefe ulaştı.")
             break
-            
+        
         # Timeout kontrolü
         if time.time() - start_time > timeout:
             send_velocity(vehicle, 0, 0, 0)
+            print(f"⏳ Drone {get_drone_id(vehicle)} timeout! Hedefe ulaşılamadı.")
             break
         
-        # PID çıkışları
+        # PID çıkışları (hedef kuvveti)
         vx = pid_north.update(north_err)
         vy = pid_east.update(east_err)
         vz = pid_down.update(down_err)
+        
+        # Kalan mesafeye göre hız limiti uygula
+        max_speed = 3.0  # m/s
+        min_speed = 0.3  # m/s - minimum hız
+        slow_down_distance = 4.0  # metre - yavaşlama başlangıç mesafesi
+        
+        # Mesafeye göre hız faktörü hesapla
+        if distance <= slow_down_distance:
+            # Mesafe azaldıkça hızı doğrusal olarak azalt
+            speed_factor = max(min_speed/max_speed, distance / slow_down_distance)
+        else:
+            speed_factor = 1.0
+        
+        # Uyarlanmış maksimum hız
+        adapted_max_speed = max_speed * speed_factor
+        
+        # Mevcut hızı kontrol et ve gerekirse kısıtla
+        current_speed = math.sqrt(vx**2 + vy**2 + vz**2)
+        if current_speed > adapted_max_speed:
+            scale = adapted_max_speed / current_speed
+            vx *= scale
+            vy *= scale
+            vz *= scale
+        
+        # Debug log
+        print(f"🚁 Drone {get_drone_id(vehicle)} -> TargetVel: ({vx:.2f}, {vy:.2f}, {vz:.2f}) Total: ({vx:.2f}, {vy:.2f}, {vz:.2f})")
         
         send_velocity(vehicle, vx, vy, vz)
         time.sleep(0.1)
@@ -239,7 +266,7 @@ def land_all(connections):
 
 # ----------------- Navigasyon -----------------
 
-def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5, timeout=120):
+def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5):
     """
     Sürü formasyonu koruyarak hedef noktaya hareket eder
     PID Formül: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kₐ(- ṗ̄)
@@ -297,13 +324,6 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
                 send_velocity(vehicle, 0, 0, 0)
             break
         
-        # Timeout kontrolü
-        if time.time() - start_time > timeout:
-            print("⏰ Timeout! Sürü durdurluyor...")
-            for vehicle in vehicles:
-                send_velocity(vehicle, 0, 0, 0)
-            break
-        
         # PID kontrolü: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kd(- ṗ̄)
         # Proportional terimi: kₚ(p* - p̄)
         vx_proportional = kp * north_error
@@ -322,10 +342,23 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
         control_vy = vy_proportional + vy_integral + vy_derivative
         
         # Hız sınırlaması
-        max_speed = 3.0  # m/s
-        speed_magnitude = math.sqrt(control_vx**2 + control_vy**2)
-        if speed_magnitude > max_speed:
-            scale = max_speed / speed_magnitude
+        max_speed = 4.0  # m/s
+        min_speed = 0.3  # m/s - minimum hız
+        slow_down_distance = max_speed * 2  # metre - yavaşlama başlangıç mesafesi
+
+        # Mesafeye göre hız faktörü hesapla
+        if horizontal_distance <= slow_down_distance:
+            # Mesafe azaldıkça hızı doğrusal olarak azalt
+            speed_factor = max(min_speed/max_speed, horizontal_distance / slow_down_distance)
+        else:
+            speed_factor = 1.0
+
+        # Uyarlanmış maksimum hız
+        adapted_max_speed = max_speed * speed_factor
+
+        current_speed = math.sqrt(control_vx**2 + control_vy**2)
+        if current_speed > adapted_max_speed:
+            scale = adapted_max_speed / current_speed
             control_vx *= scale
             control_vy *= scale
         

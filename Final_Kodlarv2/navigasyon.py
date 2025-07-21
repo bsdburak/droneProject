@@ -138,7 +138,7 @@ def land_all(connections):
 
 # ----------------- Sürü Hareketi Fonksiyonu -----------------
 
-def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5, timeout=120):
+def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, ki=0.02, kd=0.3, tolerance=0.5):
     """
     Sürü formasyonu koruyarak hedef noktaya hareket eder
     PID Formül: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kₐ(- ṗ̄)
@@ -196,13 +196,6 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
                 send_velocity(vehicle, 0, 0, 0)
             break
         
-        # Timeout kontrolü
-        if time.time() - start_time > timeout:
-            print("⏰ Timeout! Sürü durdurluyor...")
-            for vehicle in vehicles:
-                send_velocity(vehicle, 0, 0, 0)
-            break
-        
         # PID kontrolü: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kd(- ṗ̄)
         # Proportional terimi: kₚ(p* - p̄)
         vx_proportional = kp * north_error
@@ -221,10 +214,23 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
         control_vy = vy_proportional + vy_integral + vy_derivative
         
         # Hız sınırlaması
-        max_speed = 3.0  # m/s
-        speed_magnitude = math.sqrt(control_vx**2 + control_vy**2)
-        if speed_magnitude > max_speed:
-            scale = max_speed / speed_magnitude
+        max_speed = 4.0  # m/s
+        min_speed = 0.3  # m/s - minimum hız
+        slow_down_distance = max_speed * 2  # metre - yavaşlama başlangıç mesafesi
+
+        # Mesafeye göre hız faktörü hesapla
+        if horizontal_distance <= slow_down_distance:
+            # Mesafe azaldıkça hızı doğrusal olarak azalt
+            speed_factor = max(min_speed/max_speed, horizontal_distance / slow_down_distance)
+        else:
+            speed_factor = 1.0
+
+        # Uyarlanmış maksimum hız
+        adapted_max_speed = max_speed * speed_factor
+
+        current_speed = math.sqrt(control_vx**2 + control_vy**2)
+        if current_speed > adapted_max_speed:
+            scale = adapted_max_speed / current_speed
             control_vx *= scale
             control_vy *= scale
         
