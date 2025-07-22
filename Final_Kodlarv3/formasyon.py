@@ -159,7 +159,7 @@ class CollisionAvoidance:
     def __init__(self, alpha=500.0, beta=0.5, r_s=SAFETY_DISTANCE):
         """
         Çarpışma engelleme parametreleri
-        a: Kuvvet büyüklüğü
+        alpha: Kuvvet büyüklüğü
         beta: Kuvvet azalma hızı
         r_s: Etkileşim yarıçapı (metre)
         """
@@ -188,7 +188,7 @@ class CollisionAvoidance:
             return np.array([0.0, 0.0])
         
         # Potansiyel fonksiyonu
-        force_magnitude = self.a * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
+        force_magnitude = self.alpha * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
         
         # Kuvvet yönü (i'den j'ye doğru, yani itici)
         force_direction = diff / distance
@@ -303,11 +303,11 @@ def assign_targets(cost_matrix):
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
     return row_ind, col_ind
 
-def dondur_koordinatlari(x, y, derece):
-    radyan = math.radians(derece)
-    x_yeni = x * math.cos(radyan) - y * math.sin(radyan)
-    y_yeni = x * math.sin(radyan) + y * math.cos(radyan)
-    return (x_yeni, y_yeni)
+def rotate_coordinates(x, y, degrees):
+    radians = math.radians(degrees)
+    x_new = x * math.cos(radians) - y * math.sin(radians)
+    y_new = x * math.sin(radians) + y * math.cos(radians)
+    return (x_new, y_new)
 
 def formation_v(spacing_meter, num_drones, alt, rotation_angle=0):
     center = get_swarm_center(connections)
@@ -336,7 +336,7 @@ def formation_v(spacing_meter, num_drones, alt, rotation_angle=0):
     # Rotasyon açısına göre döndürme işlemi
     rotated_positions_meter = []
     for x_m, y_m in relative_positions_meter:
-        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, rotation_angle)
+        rotated_x, rotated_y = rotate_coordinates(x_m, y_m, rotation_angle)
         rotated_positions_meter.append((rotated_x, rotated_y))
     
     # Metre cinsinden pozisyonları enlem/boylama çevirme
@@ -382,7 +382,7 @@ def formation_line(spacing_meter, num_drones, alt, rotation_angle=0):
     # Rotasyon açısına göre döndürme işlemi
     rotated_positions_meter = []
     for x_m, y_m in relative_positions_meter:
-        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, rotation_angle)
+        rotated_x, rotated_y = rotate_coordinates(x_m, y_m, rotation_angle)
         rotated_positions_meter.append((rotated_x, rotated_y))
     
     # Metre cinsinden pozisyonları enlem/boylama çevirme
@@ -437,7 +437,7 @@ def formation_reverse_v(spacing_meter, num_drones, alt, rotation_angle=0):
     # Rotasyon açısına göre döndürme işlemi
     rotated_positions_meter = []
     for x_m, y_m in relative_positions_meter:
-        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, rotation_angle)
+        rotated_x, rotated_y = rotate_coordinates(x_m, y_m, rotation_angle)
         rotated_positions_meter.append((rotated_x, rotated_y))
     
     # Metre cinsinden pozisyonları enlem/boylama çevirme

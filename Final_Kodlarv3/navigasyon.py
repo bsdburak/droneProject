@@ -416,7 +416,7 @@ class CollisionAvoidance:
             return np.array([0.0, 0.0])
         
         # Potansiyel fonksiyonu
-        force_magnitude = self.a * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
+        force_magnitude = self.alpha * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
         
         # Kuvvet yönü (i'den j'ye doğru, yani itici)
         force_direction = diff / distance

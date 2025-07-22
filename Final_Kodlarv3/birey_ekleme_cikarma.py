@@ -1,4 +1,3 @@
-#Direkt BEÇ (final olmayan).py ile aynı kod test yapılacak bi de pid eklenecek yazmışız ama pid sınıfı zaten var anlamadım
 from dronekit import connect, VehicleMode, LocationGlobalRelative
 from pymavlink import mavutil
 import time
@@ -6,7 +5,7 @@ import math
 import threading
 import numpy as np
 
-NUM_DRONES = 3
+NUM_DRONES = 4
 BASE_PORT = 14550  
 TARGET_ALTITUDE = 10.0
 MAX_SPEED = 3.0 
@@ -143,7 +142,7 @@ def append_drone(index, standby_drone, target_position):
     start_collision_avoidance(connections, alpha=500.0, beta=0.5, rs=SAFETY_DISTANCE)
     arm(standby_drone)
     time.sleep(2)
-    takeoff(standby_drone, (TARGET_ALTITUDE + (SAFETY_DISTANCE * 1.5)))
+    takeoff(standby_drone, TARGET_ALTITUDE + (SAFETY_DISTANCE * 1.5))
     time.sleep(10)
 
     lat, lon, alt = target_position
@@ -174,9 +173,8 @@ class PID:
         self.last_time = time.time()
         return output
 
-def go(vehicle, lat, lon, alt, tolerance=0.5):
+def go(vehicle, target_location, tolerance=0.5):
     """PID ile drone'u hedefe gönder + çarpışma engelleme"""
-    target_location = LocationGlobalRelative(lat, lon, alt)
 
     pid_north = PID(0.4, 0.02, 0.6, MAX_SPEED)
     pid_east  = PID(0.4, 0.02, 0.6, MAX_SPEED)
@@ -193,7 +191,7 @@ def go(vehicle, lat, lon, alt, tolerance=0.5):
         
         # Mesafe kontrolü
         distance = math.sqrt(north_err**2 + east_err**2)
-        if distance <= tolerance:
+        if distance <= tolerance and abs(down_err) <= tolerance:
             send_velocity(vehicle, 0, 0, 0)
             break
         
@@ -244,7 +242,6 @@ def move_swarm_to_target(vehicles, target_lat, target_lon, target_alt, kp=0.5, k
     Sürü formasyonu koruyarak hedef noktaya hareket eder
     PID Formül: u'ᵢ = kₚ(p* - p̄) + kᵢ∫(p* - p̄)dt + kₐ(- ṗ̄)
     """
-    print(f"🎯 Sürü hedef noktaya hareket ediyor: ({target_lat:.8f}, {target_lon:.8f}, {target_alt}m)")
     
     start_time = time.time()
 
@@ -529,7 +526,7 @@ class CollisionAvoidance:
             return np.array([0.0, 0.0])
         
         # Potansiyel fonksiyonu
-        force_magnitude = self.a * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
+        force_magnitude = self.alpha * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
         
         # Kuvvet yönü (i'den j'ye doğru, yani itici)
         force_direction = diff / distance
@@ -602,9 +599,6 @@ def stop_collision_avoidance():
     
     if collision_avoidance_thread:
         collision_avoidance_thread.join(timeout=1.0)
-    
-    print("🛡️ Çarpışma engelleme sistemi durduruldu")
-
 
 # ----------------- Main -----------------
 
@@ -637,7 +631,7 @@ if __name__ == "__main__":
         time.sleep(7)
         
         # Sürüyü hedefe gönderme
-        move_swarm_to_target(connections, target_lat, target_lon)
+        move_swarm_to_target(connections, target_lat, target_lon, target_alt)
         time.sleep(15)
 
     k = int(input("Eve dönecek drone indexi: "))
