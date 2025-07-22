@@ -30,7 +30,7 @@ for i, port in enumerate(ports):
 # ----------------- PID Kontrolcüsü -----------------
 
 class PID:
-    def __init__(self, kp, ki, kd, limit=5):
+    def __init__(self, kp, ki, kd, limit=3):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.limit = limit
         self.prev_error = 0
@@ -58,16 +58,14 @@ def go(vehicle, lat, lon, alt, tolerance=0.5):
     # PID kontrolcüler
     pid_north = PID(0.4, 0.02, 0.6, MAX_SPEED)
     pid_east = PID(0.4, 0.02, 0.6, MAX_SPEED)
-    pid_down = PID(0.8, 0.05, 0.02, MAX_SPEED)
     
     drone_idx = get_drone_id(vehicle)
-    start_time = time.time()
     
     while True:
         # Mevcut konum
         curr = vehicle.location.global_relative_frame
         
-        # Hatalar (metre)
+        # Hedef konuma olan hata
         north_err = (target_location.lat - curr.lat) * 111000
         east_err = (target_location.lon - curr.lon) * 111000 * math.cos(math.radians(curr.lat))
         
@@ -100,7 +98,7 @@ def go(vehicle, lat, lon, alt, tolerance=0.5):
 # ----------------- Genel Fonksiyonlar -----------------
 
 def arm(vehicle, timeout=10):
-    """Drone'u arm eder, daha hızlı tepki süresi ve timeout ile"""
+    """Drone'u arm etme"""
     vehicle.mode = VehicleMode("GUIDED")
     time.sleep(1)  # Mode geçişinin oturması için kısa bekleme
 
@@ -140,11 +138,11 @@ def get_swarm_center(vehicles):
     return (avg_lat, avg_lon, avg_alt)
 
 def get_drone_id(vehicle):
-    """Drone'un ID'sini döndürür (0-indexli)"""
+    """Drone'un ID'sini döndürür"""
     return connections.index(vehicle)
 
 def send_velocity(vehicle, vx, vy, vz):
-    """Hız komutu gönder"""
+    """Hız komutu gönderme"""
     msg = vehicle.message_factory.set_position_target_local_ned_encode(
         0, 0, 0, mavutil.mavlink.MAV_FRAME_LOCAL_NED,
         0b0000111111000111, 0, 0, 0, vx, vy, vz, 0, 0, 0, 0, 0)
@@ -266,7 +264,7 @@ def stop_collision_avoidance():
 #------------------ Formasyon Fonksiyonları -----------------
 
 def calculate_distance(lat1, lon1, lat2, lon2):
-    """İki konum arasındaki mesafeyi hesaplar - Haversine formülü"""
+    """İki konum arasındaki mesafeyi hesaplama - Haversine formülü"""
     R = 6371000  # Dünya yarıçapı, metre
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
