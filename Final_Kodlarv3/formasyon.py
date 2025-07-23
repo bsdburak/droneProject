@@ -30,7 +30,7 @@ for i, port in enumerate(ports):
 # ----------------- PID Kontrolcüsü -----------------
 
 class PID:
-    def __init__(self, kp, ki, kd, limit=5):
+    def __init__(self, kp, ki, kd, limit=3):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.limit = limit
         self.prev_error = 0
@@ -58,16 +58,14 @@ def go(vehicle, lat, lon, alt, tolerance=0.5):
     # PID kontrolcüler
     pid_north = PID(0.4, 0.02, 0.6, MAX_SPEED)
     pid_east = PID(0.4, 0.02, 0.6, MAX_SPEED)
-    pid_down = PID(0.8, 0.05, 0.02, MAX_SPEED)
     
     drone_idx = get_drone_id(vehicle)
-    start_time = time.time()
     
     while True:
         # Mevcut konum
         curr = vehicle.location.global_relative_frame
         
-        # Hatalar (metre)
+        # Hedef konuma olan hata
         north_err = (target_location.lat - curr.lat) * 111000
         east_err = (target_location.lon - curr.lon) * 111000 * math.cos(math.radians(curr.lat))
         
@@ -100,7 +98,7 @@ def go(vehicle, lat, lon, alt, tolerance=0.5):
 # ----------------- Genel Fonksiyonlar -----------------
 
 def arm(vehicle, timeout=10):
-    """Drone'u arm eder, daha hızlı tepki süresi ve timeout ile"""
+    """Drone'u arm etme"""
     vehicle.mode = VehicleMode("GUIDED")
     time.sleep(1)  # Mode geçişinin oturması için kısa bekleme
 
@@ -140,11 +138,11 @@ def get_swarm_center(vehicles):
     return (avg_lat, avg_lon, avg_alt)
 
 def get_drone_id(vehicle):
-    """Drone'un ID'sini döndürür (0-indexli)"""
+    """Drone'un ID'sini döndürür"""
     return connections.index(vehicle)
 
 def send_velocity(vehicle, vx, vy, vz):
-    """Hız komutu gönder"""
+    """Hız komutu gönderme"""
     msg = vehicle.message_factory.set_position_target_local_ned_encode(
         0, 0, 0, mavutil.mavlink.MAV_FRAME_LOCAL_NED,
         0b0000111111000111, 0, 0, 0, vx, vy, vz, 0, 0, 0, 0, 0)
@@ -161,7 +159,7 @@ class CollisionAvoidance:
     def __init__(self, alpha=500.0, beta=0.5, r_s=SAFETY_DISTANCE):
         """
         Çarpışma engelleme parametreleri
-        a: Kuvvet büyüklüğü
+        alpha: Kuvvet büyüklüğü
         beta: Kuvvet azalma hızı
         r_s: Etkileşim yarıçapı (metre)
         """
@@ -190,7 +188,7 @@ class CollisionAvoidance:
             return np.array([0.0, 0.0])
         
         # Potansiyel fonksiyonu
-        force_magnitude = self.a * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
+        force_magnitude = self.alpha * (np.exp(-self.beta * distance) - np.exp(-self.beta * self.r_s))
         
         # Kuvvet yönü (i'den j'ye doğru, yani itici)
         force_direction = diff / distance
@@ -266,7 +264,7 @@ def stop_collision_avoidance():
 #------------------ Formasyon Fonksiyonları -----------------
 
 def calculate_distance(lat1, lon1, lat2, lon2):
-    """İki konum arasındaki mesafeyi hesaplar - Haversine formülü"""
+    """İki konum arasındaki mesafeyi hesaplama - Haversine formülü"""
     R = 6371000  # Dünya yarıçapı, metre
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -305,11 +303,11 @@ def assign_targets(cost_matrix):
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
     return row_ind, col_ind
 
-def dondur_koordinatlari(x, y, derece):
-    radyan = math.radians(derece)
-    x_yeni = x * math.cos(radyan) - y * math.sin(radyan)
-    y_yeni = x * math.sin(radyan) + y * math.cos(radyan)
-    return (x_yeni, y_yeni)
+def rotate_coordinates(x, y, degrees):
+    radians = math.radians(degrees)
+    x_new = x * math.cos(radians) - y * math.sin(radians)
+    y_new = x * math.sin(radians) + y * math.cos(radians)
+    return (x_new, y_new)
 
 def formation_v(spacing_meter, num_drones, alt, rotation_angle=0):
     center = get_swarm_center(connections)
@@ -338,7 +336,7 @@ def formation_v(spacing_meter, num_drones, alt, rotation_angle=0):
     # Rotasyon açısına göre döndürme işlemi
     rotated_positions_meter = []
     for x_m, y_m in relative_positions_meter:
-        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, rotation_angle)
+        rotated_x, rotated_y = rotate_coordinates(x_m, y_m, rotation_angle)
         rotated_positions_meter.append((rotated_x, rotated_y))
     
     # Metre cinsinden pozisyonları enlem/boylama çevirme
@@ -384,7 +382,7 @@ def formation_line(spacing_meter, num_drones, alt, rotation_angle=0):
     # Rotasyon açısına göre döndürme işlemi
     rotated_positions_meter = []
     for x_m, y_m in relative_positions_meter:
-        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, rotation_angle)
+        rotated_x, rotated_y = rotate_coordinates(x_m, y_m, rotation_angle)
         rotated_positions_meter.append((rotated_x, rotated_y))
     
     # Metre cinsinden pozisyonları enlem/boylama çevirme
@@ -439,7 +437,7 @@ def formation_reverse_v(spacing_meter, num_drones, alt, rotation_angle=0):
     # Rotasyon açısına göre döndürme işlemi
     rotated_positions_meter = []
     for x_m, y_m in relative_positions_meter:
-        rotated_x, rotated_y = dondur_koordinatlari(x_m, y_m, rotation_angle)
+        rotated_x, rotated_y = rotate_coordinates(x_m, y_m, rotation_angle)
         rotated_positions_meter.append((rotated_x, rotated_y))
     
     # Metre cinsinden pozisyonları enlem/boylama çevirme
